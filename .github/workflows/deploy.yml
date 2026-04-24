@@ -1,0 +1,102 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'server.py'
+      - 'static/**'
+      - 'requirements.txt'
+
+  workflow_dispatch:
+    inputs:
+      restart_only:
+        description: 'Only restart server (no pull)'
+        type: boolean
+        default: false
+
+env:
+  DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+  DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/home/ubuntu/.openclaw/workspace/skywatch' }}
+  APP_PORT: ${{ secrets.APP_PORT || '8090' }}
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets configured
+        run: |
+          if [ -z "${{ secrets.DEPLOY_HOST }}" ]; then
+            echo "⚠️ DEPLOY_HOST secret not set — skipping deploy"
+            echo "Set these secrets in repo Settings > Secrets:"
+            echo "  DEPLOY_HOST: your VPS IP/hostname"
+            echo "  DEPLOY_USER: SSH username"  
+            echo "  DEPLOY_KEY: SSH private key"
+            echo "  DEPLOY_PATH: (optional) app directory"
+            echo "  APP_PORT: (optional) server port"
+            exit 0
+          fi
+
+      - name: Setup SSH
+        if: env.DEPLOY_HOST != ''
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy
+        if: env.DEPLOY_HOST != ''
+        run: |
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}"
+          
+          echo "📦 Pulling latest code..."
+          $SSH_CMD << 'DEPLOY_SCRIPT'
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+            
+            # Pull latest
+            git pull origin master || git pull origin main
+            
+            # Install any new deps
+            source venv/bin/activate
+            pip install -q -r requirements.txt 2>/dev/null || true
+            
+            # Syntax check before restart
+            python -c "import py_compile; py_compile.compile('server.py', doraise=True)"
+            echo "✅ Syntax OK"
+            
+            # Restart server
+            fuser -k ${{ env.APP_PORT }}/tcp 2>/dev/null || true
+            sleep 2
+            nohup uvicorn server:app --host 0.0.0.0 --port ${{ env.APP_PORT }} > /tmp/skywatch.log 2>&1 &
+            
+            # Wait and verify
+            sleep 8
+            if curl -sf http://localhost:${{ env.APP_PORT }}/api/stats > /dev/null; then
+              echo "✅ Server is up and healthy!"
+            else
+              echo "❌ Server failed to start"
+              tail -20 /tmp/skywatch.log
+              exit 1
+            fi
+          DEPLOY_SCRIPT
+
+      - name: Health check
+        if: env.DEPLOY_HOST != ''
+        run: |
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}"
+          $SSH_CMD "curl -s http://localhost:${{ env.APP_PORT }}/api/stats | python3 -c \"
+          import sys,json
+          d=json.load(sys.stdin)
+          print(f'🛰️ SkyWatch deployed successfully')
+          print(f'   Flights: {d.get(\"flights\",\"?\")}')
+          print(f'   Satellites: {d.get(\"satellites\",\"?\")}')
+          print(f'   Uptime: {d.get(\"uptime\",\"?\")}s')
+          \""
