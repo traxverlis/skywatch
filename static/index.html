@@ -1,0 +1,2190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyWatch — Geospatial Intelligence</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-card: #1a2332;
+            --border: #1e3a5f;
+            --accent: #00d4ff;
+            --accent-dim: #006680;
+            --danger: #ff3366;
+            --warning: #ffaa00;
+            --success: #00ff88;
+            --text-primary: #e0e6ed;
+            --text-secondary: #6b7b8d;
+            --military: #ff3366;
+            --satellite: #00ff88;
+            --flight: #00d4ff;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* Top bar */
+        .topbar {
+            position: fixed; top: 0; left: 0; right: 0; height: 48px;
+            background: rgba(10, 14, 23, 0.95);
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px; z-index: 1000; backdrop-filter: blur(12px);
+        }
+        .topbar-left { display: flex; align-items: center; gap: 12px; }
+        .logo { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 16px; color: var(--accent); letter-spacing: 2px; }
+        .logo-sub { font-size: 10px; color: var(--text-secondary); letter-spacing: 1px; text-transform: uppercase; }
+        .topbar-center { display: flex; gap: 24px; }
+        .stat-pill {
+            display: flex; align-items: center; gap: 6px; padding: 4px 12px;
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px;
+            font-family: 'JetBrains Mono', monospace; font-size: 12px;
+        }
+        .stat-dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 2s infinite; }
+        .stat-dot.flights { background: var(--flight); }
+        .stat-dot.military { background: var(--military); }
+        .stat-dot.satellites { background: var(--satellite); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .topbar-right { display: flex; align-items: center; gap: 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-secondary); }
+        .live-indicator { display: flex; align-items: center; gap: 6px; color: var(--success); }
+        .live-dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; animation: pulse 1.5s infinite; }
+
+        /* Globe */
+        #cesiumContainer { position: fixed; top: 48px; left: 0; right: 0; bottom: 32px; }
+        /* Hide Cesium default UI clutter */
+        .cesium-viewer-toolbar,
+        .cesium-viewer-animationContainer,
+        .cesium-viewer-timelineContainer,
+        .cesium-viewer-bottom,
+        .cesium-viewer-fullscreenContainer,
+        .cesium-credit-logoContainer,
+        .cesium-credit-expand-link { display: none !important; }
+        .cesium-widget-credits { display: none !important; }
+        .cesium-viewer .cesium-widget-credits { display: none !important; }
+        .cesium-infoBox { background: var(--bg-card) !important; border: 1px solid var(--border) !important; }
+
+        /* Panel toggle */
+        .panel-toggle {
+            position: fixed; top: 58px; right: 10px; width: 36px; height: 36px;
+            background: rgba(26, 35, 50, 0.92); border: 1px solid var(--border);
+            border-radius: 8px; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 950; color: var(--accent); font-size: 16px;
+            backdrop-filter: blur(12px); transition: right 0.3s;
+        }
+        .panel-toggle:hover { background: rgba(0, 212, 255, 0.12); }
+        .panel-toggle.open { right: 340px; }
+
+        /* Side panel */
+        .side-panel {
+            position: fixed; top: 58px; right: 10px; width: 320px;
+            max-height: calc(100vh - 100px); overflow-y: auto; z-index: 900;
+            display: flex; flex-direction: column; gap: 8px;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+        .side-panel.collapsed { transform: translateX(340px); opacity: 0; pointer-events: none; }
+        .panel-card {
+            background: rgba(26, 35, 50, 0.92); border: 1px solid var(--border);
+            border-radius: 8px; padding: 14px; backdrop-filter: blur(12px);
+        }
+        .panel-card h3 {
+            font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent);
+            letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px;
+            display: flex; align-items: center; gap: 8px;
+        }
+
+        /* Layers */
+        .layer-toggle {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 0; border-bottom: 1px solid rgba(30, 58, 95, 0.4);
+            cursor: pointer; user-select: none;
+        }
+        .layer-toggle:last-child { border-bottom: none; }
+        .layer-label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+        .layer-color { width: 10px; height: 10px; border-radius: 50%; }
+        .toggle-switch {
+            width: 36px; height: 20px; background: var(--bg-primary); border-radius: 10px;
+            position: relative; transition: background 0.3s; border: 1px solid var(--border);
+        }
+        .toggle-switch.active { background: var(--accent-dim); border-color: var(--accent); }
+        .toggle-switch::after {
+            content: ''; position: absolute; width: 14px; height: 14px;
+            background: var(--text-secondary); border-radius: 50%; top: 2px; left: 2px; transition: all 0.3s;
+        }
+        .toggle-switch.active::after { left: 18px; background: var(--accent); }
+
+        /* Layer category headers */
+        .layer-category {
+            color: var(--accent);
+            font-size: 9px;
+            letter-spacing: 1.5px;
+            padding: 6px 0 2px;
+            margin-top: 6px;
+            border-top: 1px solid var(--border);
+            padding-top: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            user-select: none;
+        }
+        .layer-category:first-child {
+            margin-top: 0;
+            border-top: none;
+            padding-top: 0;
+        }
+        .layer-category:hover {
+            color: var(--text-primary);
+        }
+        .layer-category .cat-arrow {
+            font-size: 8px;
+            transition: transform 0.2s;
+        }
+        .layer-category .cat-arrow.collapsed {
+            transform: rotate(-90deg);
+        }
+        .layer-group {
+            overflow: hidden;
+            max-height: 500px;
+            transition: max-height 0.3s ease, opacity 0.2s;
+            opacity: 1;
+        }
+        .layer-group.collapsed {
+            max-height: 0;
+            opacity: 0;
+        }
+        .entity-list { max-height: 250px; overflow-y: auto; }
+        .entity-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 4px; font-size: 12px; border-bottom: 1px solid rgba(30, 58, 95, 0.2);
+            cursor: pointer; transition: background 0.2s; border-radius: 4px;
+        }
+        .entity-item:hover { background: rgba(0, 212, 255, 0.08); }
+        .entity-name { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+        .entity-meta { font-family: 'JetBrains Mono', monospace; color: var(--text-secondary); font-size: 10px; }
+
+        /* Search */
+        .search-box {
+            background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px;
+            padding: 8px 12px; color: var(--text-primary); font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; width: 100%; outline: none; margin-bottom: 8px;
+        }
+        .search-box::placeholder { color: var(--text-secondary); }
+        .search-box:focus { border-color: var(--accent); }
+
+        /* Bottom bar */
+        .bottombar {
+            position: fixed; bottom: 0; left: 0; right: 0; height: 32px;
+            background: rgba(10, 14, 23, 0.95); border-top: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 16px; font-family: 'JetBrains Mono', monospace;
+            font-size: 10px; color: var(--text-secondary); z-index: 1000; backdrop-filter: blur(12px);
+        }
+        .bottombar-section { display: flex; gap: 20px; }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        /* Loading */
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-primary); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 9999; transition: opacity 0.8s;
+        }
+        .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+        .loading-spinner { width: 48px; height: 48px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 16px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--accent); letter-spacing: 2px; }
+        .loading-sub { margin-top: 6px; font-size: 10px; color: var(--text-secondary); }
+
+        /* Crosshair/reticle */
+        .crosshair {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 40px; height: 40px; pointer-events: none; z-index: 500; opacity: 0.3;
+        }
+        .crosshair::before, .crosshair::after {
+            content: ''; position: absolute; background: var(--accent);
+        }
+        .crosshair::before { width: 1px; height: 100%; left: 50%; top: 0; }
+        .crosshair::after { height: 1px; width: 100%; top: 50%; left: 0; }
+        .crosshair-circle {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 24px; height: 24px; border: 1px solid var(--accent); border-radius: 50%;
+            pointer-events: none; z-index: 500; opacity: 0.25;
+        }
+
+        @media (max-width: 768px) {
+            .side-panel { width: 260px; right: 5px; }
+            .side-panel.collapsed { transform: translateX(280px); }
+            .panel-toggle.open { right: 275px; }
+            .topbar-center { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">
+    <div style="font-family:'JetBrains Mono',monospace;text-align:left;max-width:500px;padding:20px;">
+        <div style="color:var(--accent);font-size:18px;font-weight:700;letter-spacing:3px;margin-bottom:20px;">⬡ SKYWATCH v2.0</div>
+        <div id="bootLog" style="font-size:11px;color:var(--success);line-height:1.8;"></div>
+        <div class="loading-spinner" style="margin-top:16px;"></div>
+    </div>
+</div>
+
+<div class="crosshair"></div>
+<div class="crosshair-circle"></div>
+
+<div class="topbar">
+    <div class="topbar-left">
+        <div>
+            <div class="logo">⬡ SKYWATCH</div>
+            <div class="logo-sub">Geospatial Intelligence Platform</div>
+        </div>
+    </div>
+    <div class="topbar-center">
+        <div class="stat-pill"><div class="stat-dot flights"></div><span id="statFlights">—</span> flights</div>
+        <div class="stat-pill"><div class="stat-dot military"></div><span id="statMilitary">—</span> military</div>
+        <div class="stat-pill"><div class="stat-dot satellites"></div><span id="statSatellites">—</span> satellites</div>
+        <div class="stat-pill"><div class="stat-dot" style="background:#4488ff"></div><span id="statShips">—</span> ships</div>
+        <div class="stat-pill"><div class="stat-dot" style="background:#ff4444"></div><span id="statQuakes">—</span> quakes</div>
+        <div class="stat-pill"><div class="stat-dot" style="background:#ff6600"></div><span id="statFires">—</span> fires</div>
+    </div>
+    <div class="topbar-right">
+        <div class="live-indicator"><div class="live-dot"></div>LIVE</div>
+        <span id="clock">--:--:-- UTC</span>
+    </div>
+</div>
+
+<div id="cesiumContainer"></div>
+
+<div class="panel-toggle open" id="panelToggle" onclick="togglePanel()">
+    <span id="panelToggleIcon">▶</span>
+</div>
+
+<div class="side-panel" id="sidePanel">
+    <div class="panel-card">
+        <h3>⬡ Layers</h3>
+        <!-- AIR -->
+        <div class="layer-category" onclick="toggleCategory('air')">
+            <span>✈️ AIR</span><span class="cat-arrow" id="cat-arrow-air">▼</span>
+        </div>
+        <div class="layer-group" id="cat-air">
+            <div class="layer-toggle" onclick="toggleLayer('flights')">
+                <div class="layer-label"><div class="layer-color" style="background: var(--flight)"></div>Commercial Flights</div>
+                <div class="toggle-switch active" id="toggle-flights"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleLayer('military')">
+                <div class="layer-label"><div class="layer-color" style="background: var(--military)"></div>Military Aircraft</div>
+                <div class="toggle-switch active" id="toggle-military"></div>
+            </div>
+        </div>
+        <!-- SPACE -->
+        <div class="layer-category" onclick="toggleCategory('space')">
+            <span>🛰️ SPACE</span><span class="cat-arrow" id="cat-arrow-space">▼</span>
+        </div>
+        <div class="layer-group" id="cat-space">
+            <div class="layer-toggle" onclick="toggleLayer('satellites')">
+                <div class="layer-label"><div class="layer-color" style="background: var(--satellite)"></div>Satellites</div>
+                <div class="toggle-switch active" id="toggle-satellites"></div>
+            </div>
+        </div>
+        <!-- SEA -->
+        <div class="layer-category" onclick="toggleCategory('sea')">
+            <span>🌊 SEA</span><span class="cat-arrow" id="cat-arrow-sea">▼</span>
+        </div>
+        <div class="layer-group" id="cat-sea">
+            <div class="layer-toggle" onclick="toggleLayer('ships')">
+                <div class="layer-label"><div class="layer-color" style="background: #4488ff"></div>Ships (AIS)</div>
+                <div class="toggle-switch" id="toggle-ships"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleLayer('marine')">
+                <div class="layer-label"><div class="layer-color" style="background: #44aacc"></div>Marine Weather</div>
+                <div class="toggle-switch" id="toggle-marine"></div>
+            </div>
+        </div>
+        <!-- GROUND -->
+        <div class="layer-category" onclick="toggleCategory('ground')">
+            <span>🚂 GROUND</span><span class="cat-arrow" id="cat-arrow-ground">▼</span>
+        </div>
+        <div class="layer-group" id="cat-ground">
+            <div class="layer-toggle" onclick="toggleLayer('trains')">
+                <div class="layer-label"><div class="layer-color" style="background: #cc44ff"></div>Trains (France)</div>
+                <div class="toggle-switch" id="toggle-trains"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleLayer('webcams')">
+                <div class="layer-label"><div class="layer-color" style="background: #ff8800"></div>Webcams &amp; CCTV</div>
+                <div class="toggle-switch" id="toggle-webcams"></div>
+            </div>
+        </div>
+        <!-- ENVIRONMENT -->
+        <div class="layer-category" onclick="toggleCategory('env')">
+            <span>🌍 ENVIRONMENT</span><span class="cat-arrow" id="cat-arrow-env">▼</span>
+        </div>
+        <div class="layer-group" id="cat-env">
+            <div class="layer-toggle" onclick="toggleLayer('earthquakes')">
+                <div class="layer-label"><div class="layer-color" style="background: #ff4444"></div>Earthquakes (USGS)</div>
+                <div class="toggle-switch" id="toggle-earthquakes"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleLayer('fires')">
+                <div class="layer-label"><div class="layer-color" style="background: #ff6600"></div>Wildfires (NASA)</div>
+                <div class="toggle-switch" id="toggle-fires"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleLayer('airquality')">
+                <div class="layer-label"><div class="layer-color" style="background: #88cc44"></div>Air Quality (AQI)</div>
+                <div class="toggle-switch" id="toggle-airquality"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleLayer('weather')">
+                <div class="layer-label"><div class="layer-color" style="background: #66ccff"></div>Weather Overlay</div>
+                <div class="toggle-switch" id="toggle-weather"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleDayNight()">
+                <div class="layer-label"><div class="layer-color" style="background: var(--warning)"></div><span id="dayNightLabel">Night Mode</span></div>
+                <div class="toggle-switch" id="toggle-daynight"></div>
+            </div>
+        </div>
+        <!-- INTELLIGENCE -->
+        <div class="layer-category" onclick="toggleCategory('intel')">
+            <span>🎯 INTELLIGENCE</span><span class="cat-arrow" id="cat-arrow-intel">▼</span>
+        </div>
+        <div class="layer-group collapsed" id="cat-intel">
+            <div class="layer-toggle" onclick="toggleLayer('gpsjam')">
+                <div class="layer-label"><div class="layer-color" style="background: #ff0066"></div>GPS Jamming Zones</div>
+                <div class="toggle-switch" id="toggle-gpsjam"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleLayer('finance')">
+                <div class="layer-label"><div class="layer-color" style="background: #44ff88"></div>Finance Overlay</div>
+                <div class="toggle-switch" id="toggle-finance"></div>
+            </div>
+            <div class="layer-toggle" onclick="toggleLayer('bikes')">
+                <div class="layer-label"><div class="layer-color" style="background: #88ff00"></div>Bike Sharing</div>
+                <div class="toggle-switch" id="toggle-bikes"></div>
+            </div>
+            <div class="layer-toggle" onclick="showNewsPanel()">
+                <div class="layer-label"><div class="layer-color" style="background: #ffcc00"></div>Intel Briefing (AI)</div>
+                <div class="toggle-switch" id="toggle-news"></div>
+            </div>
+        </div>
+        <!-- VIEW -->
+        <div class="layer-category" onclick="toggleCategory('view')">
+            <span>🗺️ VIEW</span><span class="cat-arrow" id="cat-arrow-view">▼</span>
+        </div>
+        <div class="layer-group" id="cat-view">
+            <div class="layer-toggle" onclick="toggle2D3D()">
+                <div class="layer-label"><div class="layer-color" style="background: #aaa"></div><span id="mode3dLabel">3D Globe</span></div>
+                <div class="toggle-switch active" id="toggle-3d"></div>
+            </div>
+        </div>
+    </div>
+    <div class="panel-card">
+        <h3>🔍 Search</h3>
+        <input type="text" class="search-box" id="searchBox" placeholder="Search: city, country, flight, satellite..." oninput="filterEntities(this.value)" onkeydown="if(event.key==='Enter')searchLocation(this.value)">
+    </div>
+    <div class="panel-card">
+        <h3>📡 Active Tracking</h3>
+        <div class="entity-list" id="entityList"><div class="entity-item" style="color: var(--text-secondary); font-style: italic;">Loading data...</div></div>
+    </div>
+</div>
+
+<div class="bottombar">
+    <div class="bottombar-section">
+        <span>SRC: ADSB.lol+fi • CelesTrak • USGS • NASA FIRMS • AIS</span>
+        <span id="coordsDisplay">LAT — LON —</span>
+    </div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-secondary);margin-left:16px;">1⃣ NightVis 2⃣ Thermal 3⃣ CRT 0⃣ Normal | F Fullscreen</div>
+    <div class="bottombar-section">
+        <span id="lastUpdate">Last update: —</span>
+        <span>v2.0.0</span>
+    </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+const UPDATE_INTERVAL = 15000;
+
+let viewer = null;
+let flightEntities = {};
+let satelliteEntities = {};
+let allFlights = [];
+let allSatellites = [];
+let activeTrail = null; // current polyline entity for trail/orbit
+let activeTrailId = null;
+let isDayMode = false;
+let dayTileLayer = null;
+let nightTileLayer = null;
+const layers = { flights: true, military: true, satellites: true, ships: false, marine: false, webcams: false, trains: false, weather: false, earthquakes: false, fires: false, airquality: false, gpsjam: false, finance: false, bikes: false };
+let marineEntities = {};
+let webcamEntities = {};
+let shipEntities = {};
+let allShips = [];
+let trainEntities = {};
+let weatherLayer = null;
+let is3D = true;
+let earthquakeEntities = {};
+let fireEntities = {};
+let aqiEntities = {};
+let gpsJamEntities = {};
+let financeEntities = {};
+let bikeEntities = {};
+let allEarthquakes = [];
+let allFires = [];
+let postProcessStages = {};
+let currentFilter = null;
+let trackedEntity = null; // {type, id, data} for lock-on tracking
+let trackingInterval = null;
+
+// =========================================================================
+// PLANE SVG ICON — rotated by heading
+// =========================================================================
+const PLANE_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <path d="M32 4 L38 28 L56 36 L56 40 L38 34 L36 52 L42 56 L42 60 L32 57 L22 60 L22 56 L28 52 L26 34 L8 40 L8 36 L26 28 Z" fill="__COLOR__" stroke="#000" stroke-width="1.5"/>
+</svg>`);
+
+function makePlaneIcon(color) {
+    return `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <path d="M32 4 L38 28 L56 36 L56 40 L38 34 L36 52 L42 56 L42 60 L32 57 L22 60 L22 56 L28 52 L26 34 L8 40 L8 36 L26 28 Z" fill="${color}" stroke="#000" stroke-width="1.5"/>
+</svg>`);
+}
+
+const PLANE_CYAN = makePlaneIcon('#00d4ff');
+const PLANE_RED = makePlaneIcon('#ff3366');
+
+const SAT_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect x="22" y="22" width="20" height="20" rx="3" fill="#00ff88" stroke="#004422" stroke-width="2"/>
+  <rect x="8" y="28" width="14" height="8" rx="1" fill="#00cc66"/>
+  <rect x="42" y="28" width="14" height="8" rx="1" fill="#00cc66"/>
+  <circle cx="32" cy="32" r="4" fill="#004422"/>
+  <circle cx="32" cy="32" r="2" fill="#00ff88"/>
+</svg>`);
+
+const SHIP_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <path d="M32 8 L44 32 L44 44 L40 52 L24 52 L20 44 L20 32 Z" fill="#4488ff" stroke="#002266" stroke-width="2"/>
+  <rect x="29" y="16" width="6" height="20" fill="#6699ff"/>
+</svg>`);
+
+const WEBCAM_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="32" cy="28" r="16" fill="#ff8800" stroke="#663300" stroke-width="2"/>
+  <circle cx="32" cy="28" r="8" fill="#ffaa44"/>
+  <circle cx="32" cy="28" r="3" fill="#fff"/>
+  <rect x="22" y="46" width="20" height="8" rx="2" fill="#ff8800"/>
+</svg>`);
+
+const TRAIN_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect x="18" y="12" width="28" height="36" rx="6" fill="#cc44ff" stroke="#440066" stroke-width="2"/>
+  <rect x="24" y="18" width="16" height="10" rx="2" fill="#dd88ff"/>
+  <circle cx="26" cy="44" r="4" fill="#440066"/>
+  <circle cx="38" cy="44" r="4" fill="#440066"/>
+  <rect x="14" y="48" width="36" height="4" rx="2" fill="#880088"/>
+</svg>`);
+
+const BUOY_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="32" cy="32" r="14" fill="#44aacc" stroke="#004466" stroke-width="2"/>
+  <path d="M32 18 L32 8" stroke="#44aacc" stroke-width="3"/>
+  <circle cx="32" cy="6" r="3" fill="#88ddff"/>
+  <path d="M22 38 Q32 50 42 38" fill="none" stroke="#88ddff" stroke-width="2"/>
+</svg>`);
+
+const QUAKE_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="32" cy="32" r="18" fill="#ff4444" fill-opacity="0.6" stroke="#ff0000" stroke-width="2"/>
+  <circle cx="32" cy="32" r="10" fill="#ff6666" fill-opacity="0.8"/>
+  <circle cx="32" cy="32" r="4" fill="#ffffff"/>
+</svg>`);
+
+const FIRE_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <path d="M32 8 C32 8 44 24 44 36 C44 46 38 52 32 52 C26 52 20 46 20 36 C20 24 32 8 32 8Z" fill="#ff6600" stroke="#cc3300" stroke-width="1.5"/>
+  <path d="M32 20 C32 20 38 30 38 36 C38 42 35 46 32 46 C29 46 26 42 26 36 C26 30 32 20 32 20Z" fill="#ffaa00"/>
+  <ellipse cx="32" cy="38" rx="4" ry="6" fill="#ffdd44"/>
+</svg>`);
+
+const AQI_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="32" cy="32" r="16" fill="__COLOR__" fill-opacity="0.7" stroke="#333" stroke-width="1.5"/>
+  <text x="32" y="36" text-anchor="middle" font-size="14" font-weight="bold" fill="#fff" font-family="monospace">AQI</text>
+</svg>`);
+
+function makeAqiIcon(aqi) {
+    let color = '#00ff88'; // good
+    if (aqi > 100) color = '#ff0000';
+    else if (aqi > 75) color = '#ff6600';
+    else if (aqi > 50) color = '#ffaa00';
+    else if (aqi > 25) color = '#88cc44';
+    return `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="32" cy="32" r="16" fill="${color}" fill-opacity="0.7" stroke="#333" stroke-width="1.5"/>
+  <text x="32" y="37" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff" font-family="monospace">${aqi || '?'}</text>
+</svg>`);
+}
+
+const FINANCE_SVG_UP = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect x="12" y="12" width="40" height="40" rx="6" fill="#003322" fill-opacity="0.85" stroke="#00ff88" stroke-width="2"/>
+  <path d="M22 40 L32 24 L42 40" fill="none" stroke="#00ff88" stroke-width="3"/>
+</svg>`);
+
+const FINANCE_SVG_DOWN = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect x="12" y="12" width="40" height="40" rx="6" fill="#330011" fill-opacity="0.85" stroke="#ff3366" stroke-width="2"/>
+  <path d="M22 24 L32 40 L42 24" fill="none" stroke="#ff3366" stroke-width="3"/>
+</svg>`);
+
+const BIKE_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="20" cy="40" r="10" fill="none" stroke="#88ff00" stroke-width="3"/>
+  <circle cx="44" cy="40" r="10" fill="none" stroke="#88ff00" stroke-width="3"/>
+  <path d="M20 40 L28 22 L38 22 L44 40 L28 40" fill="none" stroke="#88ff00" stroke-width="2.5"/>
+  <circle cx="28" cy="22" r="3" fill="#88ff00"/>
+</svg>`);
+
+const JAMMING_SVG = `data:image/svg+xml;base64,` + btoa(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="32" cy="32" r="20" fill="#ff0066" fill-opacity="0.2" stroke="#ff0066" stroke-width="2" stroke-dasharray="6 3"/>
+  <path d="M22 22 L42 42 M42 22 L22 42" stroke="#ff0066" stroke-width="3"/>
+  <circle cx="32" cy="32" r="6" fill="#ff0066" fill-opacity="0.5"/>
+</svg>`);
+
+// =========================================================================
+// INIT CESIUM — no Ion token, using free OSM / ESRI tiles
+// =========================================================================
+async function bootSequence() {
+    const log = document.getElementById('bootLog');
+    const lines = [
+        '> SYSTEM INIT...................... OK',
+        '> LOADING CESIUM 3D ENGINE........ OK',
+        '> CONNECTING ADSB.LOL + ADSB.FI... OK',
+        '> ACQUIRING CELESTRAK TLE DATA.... OK',
+        '> AIS MARITIME STREAM............. OK',
+        '> USGS SEISMIC FEED............... STANDBY',
+        '> NASA FIRMS FIRE DETECTION....... STANDBY',
+        '> PERPLEXITY AI LINK.............. OK',
+        '> GPS JAMMING DATABASE............ LOADED',
+        '> RENDERING GLOBE................. ',
+    ];
+    for (const line of lines) {
+        const div = document.createElement('div');
+        log.appendChild(div);
+        for (let i = 0; i < line.length; i++) {
+            div.textContent += line[i];
+            await new Promise(r => setTimeout(r, 8));
+        }
+    }
+}
+
+async function initCesium() {
+    try {
+        // Cesium Ion token
+        Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIyZTNiOTg3ZS1mYmNmLTQ0YjAtYmVlMi00YjI0NmRhZGEwMWEiLCJpZCI6NDIyNzE3LCJpYXQiOjE3NzY5ODU1Mjh9.-TQpFU8qezXxUUGrHR3wyuTdN-0QgoDtqpx6pMnkwbY';
+
+        viewer = new Cesium.Viewer('cesiumContainer', {
+            baseLayerPicker: false,
+            geocoder: false,
+            homeButton: false,
+            sceneModePicker: false,
+            navigationHelpButton: false,
+            animation: false,
+            timeline: false,
+            fullscreenButton: false,
+            vrButton: false,
+            infoBox: false,
+            selectionIndicator: true,
+            creditContainer: document.createElement('div'),
+            imageryProvider: false,
+            skyBox: new Cesium.SkyBox({
+                sources: {
+                    positiveX: Cesium.buildModuleUrl('Assets/Textures/SkyBox/tycho2t3_80_px.jpg'),
+                    negativeX: Cesium.buildModuleUrl('Assets/Textures/SkyBox/tycho2t3_80_mx.jpg'),
+                    positiveY: Cesium.buildModuleUrl('Assets/Textures/SkyBox/tycho2t3_80_py.jpg'),
+                    negativeY: Cesium.buildModuleUrl('Assets/Textures/SkyBox/tycho2t3_80_my.jpg'),
+                    positiveZ: Cesium.buildModuleUrl('Assets/Textures/SkyBox/tycho2t3_80_pz.jpg'),
+                    negativeZ: Cesium.buildModuleUrl('Assets/Textures/SkyBox/tycho2t3_80_mz.jpg'),
+                },
+            }),
+            skyAtmosphere: new Cesium.SkyAtmosphere(),
+            orderIndependentTranslucency: false,
+            contextOptions: { webgl: { alpha: false } },
+        });
+
+        // Remove any default imagery
+        viewer.imageryLayers.removeAll();
+
+        // Night mode: Bing Maps Aerial (dark look)
+        const nightProvider = await Cesium.IonImageryProvider.fromAssetId(2);
+        nightTileLayer = viewer.imageryLayers.addImageryProvider(nightProvider);
+        nightTileLayer.brightness = 0.6;
+        nightTileLayer.contrast = 1.2;
+        nightTileLayer.saturation = 0.3;
+
+        // Day mode: Bing Maps Aerial with Labels
+        const dayProvider = await Cesium.IonImageryProvider.fromAssetId(3);
+        dayTileLayer = viewer.imageryLayers.addImageryProvider(dayProvider);
+        dayTileLayer.show = false;
+
+        // Cesium World Terrain (3D relief)
+        viewer.scene.terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(1);
+
+        // Dark globe styling
+        const scene = viewer.scene;
+        scene.backgroundColor = Cesium.Color.fromCssColorString('#000008');
+        scene.globe.baseColor = Cesium.Color.fromCssColorString('#0d1b2a');
+        scene.globe.showGroundAtmosphere = true;
+        scene.globe.enableLighting = false;
+        scene.fog.enabled = true;
+        scene.fog.density = 2e-4;
+        scene.sun.show = false;
+        scene.moon.show = false;
+        scene.skyAtmosphere.brightnessShift = -0.3;
+        scene.skyAtmosphere.saturationShift = -0.2;
+
+        // Set view instantly (no fly animation)
+        viewer.camera.setView({
+            destination: Cesium.Cartesian3.fromDegrees(10, 25, 22000000),
+        });
+
+        // Mouse coords
+        const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
+        handler.setInputAction((movement) => {
+            const cartesian = viewer.camera.pickEllipsoid(movement.endPosition, scene.globe.ellipsoid);
+            if (cartesian) {
+                const carto = Cesium.Cartographic.fromCartesian(cartesian);
+                document.getElementById('coordsDisplay').textContent =
+                    `LAT ${Cesium.Math.toDegrees(carto.latitude).toFixed(4)} LON ${Cesium.Math.toDegrees(carto.longitude).toFixed(4)}`;
+            }
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+        console.log('CesiumJS initialized successfully');
+    } catch (e) {
+        console.error('CesiumJS init error:', e);
+    }
+
+    // Always hide loading — even if Cesium had a minor error
+    document.getElementById('loadingOverlay').classList.add('hidden');
+}
+
+// =========================================================================
+// DATA
+// =========================================================================
+async function fetchFlights() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/flights`);
+        const data = await resp.json();
+        allFlights = data.flights || [];
+        updateFlightEntities();
+        updateStats();
+        // Refresh active flight trail if any
+        if (activeTrailId && !activeTrailId.startsWith('sat-')) {
+            showFlightTrail(activeTrailId, allFlights.find(f => f.hex === activeTrailId));
+        }
+    } catch (e) { console.error('Flight fetch error:', e); }
+}
+
+async function fetchSatellites() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/satellites/all?limit=500`);
+        const data = await resp.json();
+        allSatellites = data.satellites || [];
+        updateSatelliteEntities();
+        updateStats();
+    } catch (e) { console.error('Satellite fetch error:', e); }
+}
+
+// =========================================================================
+// ENTITY RENDERING
+// =========================================================================
+function altitudeColor(alt) {
+    // Altitude color bands: blue (low) → cyan → green → yellow → orange → red (high)
+    if (!alt || alt <= 0) return '#888888';
+    if (alt < 5000) return '#4488ff';   // blue - low
+    if (alt < 15000) return '#00d4ff';  // cyan
+    if (alt < 25000) return '#00ff88';  // green
+    if (alt < 35000) return '#ffaa00';  // yellow-orange
+    if (alt < 40000) return '#ff6600';  // orange
+    return '#ff3366';                    // red - very high
+}
+
+function updateFlightEntities() {
+    if (!viewer) return;
+    const seen = new Set();
+
+    for (const f of allFlights) {
+        const id = f.hex;
+        if (!id) continue;
+        seen.add(id);
+
+        const isMilitary = f.military;
+        const color = isMilitary ? Cesium.Color.fromCssColorString('#ff3366')
+                                  : Cesium.Color.fromCssColorString('#00d4ff');
+        const show = isMilitary ? layers.military : layers.flights;
+        const alt = (typeof f.alt === 'number' && f.alt > 0) ? f.alt * 0.3048 : 10000;
+        const position = Cesium.Cartesian3.fromDegrees(f.lon, f.lat, alt);
+
+        if (flightEntities[id]) {
+            flightEntities[id].position = position;
+            flightEntities[id].show = show;
+            if (flightEntities[id].billboard) {
+                flightEntities[id].billboard.rotation = -Cesium.Math.toRadians(f.heading || 0);
+            }
+        } else {
+            flightEntities[id] = viewer.entities.add({
+                id: `f-${id}`,
+                position: position,
+                billboard: {
+                    image: isMilitary ? PLANE_RED : PLANE_CYAN,
+                    width: isMilitary ? 22 : 16,
+                    height: isMilitary ? 22 : 16,
+                    rotation: -Cesium.Math.toRadians(f.heading || 0),
+                    scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 2e7, 0.3),
+                    color: Cesium.Color.WHITE,
+                },
+                label: {
+                    text: f.flight || f.hex,
+                    font: '10px JetBrains Mono',
+                    fillColor: color,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    pixelOffset: new Cesium.Cartesian2(14, 0),
+                    scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 5e6, 0),
+                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3e6),
+                },
+                show: show,
+            });
+        }
+    }
+
+    for (const id of Object.keys(flightEntities)) {
+        if (!seen.has(id)) {
+            viewer.entities.remove(flightEntities[id]);
+            delete flightEntities[id];
+        }
+    }
+}
+
+function updateSatelliteEntities() {
+    if (!viewer) return;
+    for (const id of Object.keys(satelliteEntities)) {
+        viewer.entities.remove(satelliteEntities[id]);
+    }
+    satelliteEntities = {};
+
+    for (const s of allSatellites) {
+        const id = s.name;
+        const alt = (s.alt > 0 ? s.alt : 400) * 1000;
+        const position = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, alt);
+        const isDebris = s.is_debris || (s.group && s.group.startsWith('debris'));
+        const group = s.group || 'unknown';
+
+        // Color by type
+        let color = '#00ff88'; // default green
+        let icon = SAT_SVG;
+        let size = 18;
+        if (isDebris) {
+            color = '#ff4444'; // red for debris
+            size = 8; // smaller
+        } else if (group === 'military') {
+            color = '#ff3366';
+        } else if (group === 'starlink' || group === 'oneweb') {
+            color = '#88aaff';
+            size = 10;
+        } else if (group === 'gps') {
+            color = '#ffaa00';
+        } else if (group === 'weather') {
+            color = '#66ccff';
+        } else if (group === 'science') {
+            color = '#ff88ff';
+        }
+
+        satelliteEntities[id] = viewer.entities.add({
+            id: `s-${id}`,
+            position: position,
+            billboard: {
+                image: icon,
+                width: size,
+                height: size,
+                scaleByDistance: new Cesium.NearFarScalar(1e6, 2, 5e7, 0.4),
+                color: Cesium.Color.fromCssColorString(color),
+            },
+            label: {
+                text: isDebris ? '' : s.name,
+                font: '11px JetBrains Mono',
+                fillColor: Cesium.Color.fromCssColorString(color),
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(14, 0),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 2e7, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, isDebris ? 5e6 : 2e7),
+            },
+            show: layers.satellites,
+        });
+    }
+    // Update stat with debris count
+    const debrisCount = allSatellites.filter(s => s.is_debris).length;
+    const satCount = allSatellites.length - debrisCount;
+    document.getElementById('statSatellites').textContent = allSatellites.length.toLocaleString();
+}
+
+// =========================================================================
+// UI
+// =========================================================================
+function updateStats() {
+    const military = allFlights.filter(f => f.military);
+    document.getElementById('statFlights').textContent = allFlights.length.toLocaleString();
+    document.getElementById('statMilitary').textContent = military.length.toLocaleString();
+    document.getElementById('statSatellites').textContent = allSatellites.length.toLocaleString();
+    document.getElementById('lastUpdate').textContent = `Last update: ${new Date().toISOString().substr(11, 8)} UTC`;
+    updateEntityList();
+}
+
+function updateEntityList() {
+    const list = document.getElementById('entityList');
+    const items = [];
+
+    const military = allFlights.filter(f => f.military).slice(0, 8);
+    for (const f of military) {
+        items.push(`<div class="entity-item" onclick="flyToEntity(${f.lon},${f.lat})">
+            <div><div class="entity-name" style="color:var(--military)">✦ ${f.flight||f.hex}</div>
+            <div class="entity-meta">${f.type||'?'} • ${f.alt||'?'} ft</div></div>
+            <div class="entity-meta">${f.speed||'?'} kts</div></div>`);
+    }
+    for (const s of allSatellites.slice(0, 5)) {
+        items.push(`<div class="entity-item" onclick="flyToEntity(${s.lon},${s.lat})">
+            <div><div class="entity-name" style="color:var(--satellite)">◉ ${s.name}</div>
+            <div class="entity-meta">${s.alt} km alt</div></div>
+            <div class="entity-meta">${s.velocity} km/s</div></div>`);
+    }
+    const commercial = allFlights.filter(f => !f.military && f.flight).slice(0, 12);
+    for (const f of commercial) {
+        items.push(`<div class="entity-item" onclick="flyToEntity(${f.lon},${f.lat})">
+            <div><div class="entity-name" style="color:var(--flight)">▸ ${f.flight}</div>
+            <div class="entity-meta">${f.type||'?'} • ${f.alt||'?'} ft</div></div>
+            <div class="entity-meta">${f.speed||'?'} kts</div></div>`);
+    }
+    list.innerHTML = items.join('') || '<div style="color:var(--text-secondary);font-style:italic;padding:8px 0;">No data</div>';
+}
+
+function updateClock() {
+    document.getElementById('clock').textContent = new Date().toISOString().substr(11, 8) + ' UTC';
+}
+
+// =========================================================================
+// INTERACTIONS
+// =========================================================================
+function toggleDayNight() {
+    isDayMode = !isDayMode;
+    const el = document.getElementById('toggle-daynight');
+    const label = document.getElementById('dayNightLabel');
+    el.classList.toggle('active', isDayMode);
+
+    if (isDayMode) {
+        label.textContent = 'Day Mode';
+        nightTileLayer.show = false;
+        dayTileLayer.show = true;
+        viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#c8d6e5');
+        viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#a0b4c8');
+    } else {
+        label.textContent = 'Night Mode';
+        nightTileLayer.show = true;
+        dayTileLayer.show = false;
+        viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0e17');
+        viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0d1b2a');
+    }
+}
+
+function toggleCategory(cat) {
+    const group = document.getElementById(`cat-${cat}`);
+    const arrow = document.getElementById(`cat-arrow-${cat}`);
+    if (!group) return;
+    const isCollapsed = group.classList.toggle('collapsed');
+    if (arrow) arrow.classList.toggle('collapsed', isCollapsed);
+}
+
+function togglePanel() {
+    const panel = document.getElementById('sidePanel');
+    const btn = document.getElementById('panelToggle');
+    const icon = document.getElementById('panelToggleIcon');
+    const collapsed = panel.classList.toggle('collapsed');
+    btn.classList.toggle('open', !collapsed);
+    icon.textContent = collapsed ? '◀' : '▶';
+}
+
+function toggleLayer(name) {
+    layers[name] = !layers[name];
+    const el = document.getElementById(`toggle-${name}`);
+    if (el) el.classList.toggle('active', layers[name]);
+
+    if (name === 'flights' || name === 'military') {
+        for (const [id, entity] of Object.entries(flightEntities)) {
+            const f = allFlights.find(fl => fl.hex === id);
+            if (f) entity.show = f.military ? layers.military : layers.flights;
+        }
+    }
+    if (name === 'satellites') {
+        for (const e of Object.values(satelliteEntities)) e.show = layers.satellites;
+    }
+    if (name === 'ships') { layers.ships ? fetchShips() : renderShips([]); }
+    if (name === 'marine') { layers.marine ? fetchMarine() : renderMarineBuoys([]); }
+    if (name === 'webcams') { layers.webcams ? fetchWebcams() : renderWebcams([]); }
+    if (name === 'earthquakes') { layers.earthquakes ? fetchEarthquakes() : renderEarthquakes(); }
+    if (name === 'fires') { layers.fires ? fetchFires() : renderFires(); }
+    if (name === 'airquality') { layers.airquality ? fetchAirQuality() : renderAirQuality([]); }
+    if (name === 'gpsjam') { layers.gpsjam ? fetchGpsJamming() : renderGpsJamming([]); }
+    if (name === 'finance') { layers.finance ? fetchFinance() : renderFinance([]); }
+    if (name === 'bikes') { layers.bikes ? fetchBikes() : renderBikes([]); }
+    if (name === 'trains') {
+        if (layers.trains) {
+            fetchTrains();
+            // Zoom to France
+            viewer.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(2.5, 46.5, 2000000),
+                duration: 1.5,
+            });
+        } else {
+            renderTrains([]);
+        }
+    }
+    if (name === 'weather') { addWeatherOverlay(); }
+    if (name === 'ships') {
+        // Ships placeholder — needs AIS API key
+        if (!layers.ships) { /* remove ship entities */ }
+    }
+}
+
+function flyToEntity(lon, lat) {
+    smartFlyTo(lon, lat, 0, 800000);
+}
+
+// Smart fly: stay at current altitude when already close, only descend never ascend
+function smartFlyTo(lon, lat, entityAlt, defaultAlt) {
+    if (!viewer) return;
+    const camCarto = viewer.camera.positionCartographic;
+    const currentAlt = camCarto ? camCarto.height : defaultAlt;
+    
+    // If already close (below 2x default), keep current altitude
+    // If far away, descend to defaultAlt
+    let targetAlt;
+    if (currentAlt <= defaultAlt * 2) {
+        targetAlt = currentAlt; // stay where you are
+    } else {
+        targetAlt = defaultAlt; // descend
+    }
+    const finalAlt = Math.max(targetAlt, 200) + entityAlt;
+
+    viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(lon, lat, finalAlt),
+        orientation: {
+            heading: viewer.camera.heading,
+            pitch: viewer.camera.pitch, // keep current pitch too
+            roll: 0,
+        },
+        duration: 0.6,
+    });
+}
+
+// =========================================================================
+// TRAIL / ORBIT DISPLAY
+// =========================================================================
+function clearTrail() {
+    if (activeTrail) {
+        viewer.entities.remove(activeTrail);
+        activeTrail = null;
+        activeTrailId = null;
+    }
+}
+
+async function showFlightTrail(hexId, flight) {
+    clearTrail();
+    activeTrailId = hexId;
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/flight-trail/${hexId}`);
+        const data = await resp.json();
+        if (!data.trail || data.trail.length < 2) {
+            // Not enough history yet — show message
+            console.log('Trail: not enough history yet, will build over time');
+            return;
+        }
+
+        const positions = [];
+        for (const p of data.trail) {
+            const alt = (typeof p.alt === 'number' && p.alt > 0) ? p.alt * 0.3048 : 10000;
+            positions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, alt));
+        }
+
+        activeTrail = viewer.entities.add({
+            id: 'trail-active',
+            polyline: {
+                positions: positions,
+                width: 2,
+                material: new Cesium.PolylineGlowMaterialProperty({
+                    glowPower: 0.3,
+                    color: flight && flight.military
+                        ? Cesium.Color.fromCssColorString('#ff336680')
+                        : Cesium.Color.fromCssColorString('#00d4ff80'),
+                }),
+                clampToGround: false,
+            },
+        });
+    } catch (e) {
+        console.error('Trail fetch error:', e);
+    }
+}
+
+async function showSatelliteOrbit(name) {
+    clearTrail();
+    activeTrailId = 'sat-' + name;
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/satellite-orbit/${encodeURIComponent(name)}?minutes=90`);
+        const data = await resp.json();
+        if (!data.orbit || data.orbit.length < 2) return;
+
+        // Split orbit into segments to avoid wrapping artifacts at -180/180
+        const segments = [[]];
+        for (let i = 0; i < data.orbit.length; i++) {
+            const p = data.orbit[i];
+            segments[segments.length - 1].push(p);
+            if (i > 0) {
+                const prev = data.orbit[i - 1];
+                if (Math.abs(p.lon - prev.lon) > 180) {
+                    segments.push([]);
+                }
+            }
+        }
+
+        // Draw each segment
+        const entities = [];
+        for (const seg of segments) {
+            if (seg.length < 2) continue;
+            const positions = seg.map(p =>
+                Cesium.Cartesian3.fromDegrees(p.lon, p.lat, (p.alt > 0 ? p.alt : 400) * 1000)
+            );
+            entities.push(viewer.entities.add({
+                polyline: {
+                    positions: positions,
+                    width: 2,
+                    material: new Cesium.PolylineGlowMaterialProperty({
+                        glowPower: 0.4,
+                        color: Cesium.Color.fromCssColorString('#00ff8860'),
+                    }),
+                    clampToGround: false,
+                },
+            }));
+        }
+
+        // Store first entity as activeTrail, keep refs to remove all later
+        activeTrail = entities[0];
+        activeTrail._orbitSegments = entities;
+    } catch (e) {
+        console.error('Orbit fetch error:', e);
+    }
+}
+
+// Override clearTrail to handle orbit segments
+const _origClearTrail = clearTrail;
+function clearAllTrails() {
+    if (activeTrail && activeTrail._orbitSegments) {
+        for (const e of activeTrail._orbitSegments) {
+            viewer.entities.remove(e);
+        }
+    } else if (activeTrail) {
+        viewer.entities.remove(activeTrail);
+    }
+    activeTrail = null;
+    activeTrailId = null;
+    stopTracking();
+}
+
+function stopTracking() {
+    if (trackingInterval) {
+        clearInterval(trackingInterval);
+        trackingInterval = null;
+    }
+    trackedEntity = null;
+    const btn = document.getElementById('trackingBadge');
+    if (btn) btn.style.display = 'none';
+}
+
+function startTracking(type, id, data) {
+    stopTracking();
+    trackedEntity = {type, id, data};
+    // Show tracking badge
+    let badge = document.getElementById('trackingBadge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'trackingBadge';
+        badge.style.cssText = 'position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:1001;background:rgba(0,212,255,0.15);border:1px solid var(--accent);border-radius:20px;padding:4px 16px;font-family:JetBrains Mono;font-size:11px;color:var(--accent);cursor:pointer;backdrop-filter:blur(8px);';
+        badge.onclick = () => { stopTracking(); clearAllTrails(); };
+        document.body.appendChild(badge);
+    }
+    const label = type === 'flight' ? (data.flight || data.hex) : (type === 'satellite' ? data.name : (data.name || data.mmsi));
+    badge.innerHTML = `\uD83C\uDFAF TRACKING: ${label} <span style="color:var(--text-secondary);font-size:9px;margin-left:8px;">ESC/click to stop</span>`;
+    badge.style.display = 'block';
+
+    // Immediate flyTo on first click
+    function flyToTarget(target, fast) {
+        const alt = type === 'satellite' ? ((target.alt || 400) * 1000 + 300000) :
+                    type === 'flight' ? ((typeof target.alt === 'number' && target.alt > 0 ? target.alt * 0.3048 : 10000) + 50000) : 20000;
+        viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(target.lon, target.lat, alt),
+            orientation: { heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-45), roll: 0 },
+            duration: fast ? 1.0 : 2.5,
+        });
+    }
+    flyToTarget(data, true);
+
+    // Follow entity every 4s
+    trackingInterval = setInterval(() => {
+        let target = null;
+        if (type === 'flight') {
+            target = allFlights.find(f => f.hex === id);
+        } else if (type === 'satellite') {
+            target = allSatellites.find(s => s.name === id);
+        } else if (type === 'ship') {
+            target = allShips.find(s => String(s.mmsi) === id);
+        }
+        if (target) {
+            trackedEntity.data = target;
+            flyToTarget(target, false);
+            if (type === 'flight') showFlightTrail(id, target);
+        }
+    }, 4000);
+}
+
+// =========================================================================
+// ENTITY CLICK HANDLER
+// =========================================================================
+function setupClickHandler() {
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    handler.setInputAction((click) => {
+        const picked = viewer.scene.pick(click.position);
+        if (Cesium.defined(picked) && picked.id) {
+            const entityId = picked.id.id || '';
+
+            if (entityId.startsWith('f-')) {
+                const hexId = entityId.substring(2);
+                const flight = allFlights.find(f => f.hex === hexId);
+                clearAllTrails();
+                showFlightTrail(hexId, flight);
+                if (flight) {
+                    showEntityInfo(flight, 'flight');
+                    startTracking('flight', hexId, flight);
+                }
+            } else if (entityId.startsWith('s-')) {
+                const satName = entityId.substring(2);
+                clearAllTrails();
+                showSatelliteOrbit(satName);
+                const sat = allSatellites.find(s => s.name === satName);
+                if (sat) {
+                    showEntityInfo(sat, 'satellite');
+                    startTracking('satellite', satName, sat);
+                }
+            } else if (entityId.startsWith('cam-')) {
+                // Webcam clicked — show video overlay
+                const entity = picked.id;
+                const url = entity.properties?.url?.getValue();
+                const camName = entity.properties?.camName?.getValue();
+                const embedUrl = entity.properties?.embedUrl?.getValue();
+                const imgUrl = entity.properties?.imageUrl?.getValue();
+                const camType = entity.properties?.camType?.getValue() || '';
+                clearAllTrails();
+                showCamOverlay(camName, url, embedUrl, imgUrl, camType);
+                // Zoom to camera
+                const pos = entity.position?.getValue(Cesium.JulianDate.now());
+                if (pos) {
+                    const carto = Cesium.Cartographic.fromCartesian(pos);
+                    smartFlyTo(
+                        Cesium.Math.toDegrees(carto.longitude),
+                        Cesium.Math.toDegrees(carto.latitude),
+                        0, 3000);
+                }
+            } else if (entityId.startsWith('ship-')) {
+                const mmsi = entityId.substring(5);
+                const ship = allShips.find(s => String(s.mmsi) === mmsi);
+                if (ship) {
+                    clearAllTrails();
+                    showEntityInfo(ship, 'ship');
+                    startTracking('ship', String(ship.mmsi), ship);
+                }
+            } else if (entityId.startsWith('train-')) {
+                clearAllTrails();
+                const pos = picked.id.position?.getValue(Cesium.JulianDate.now());
+                if (pos) {
+                    const carto = Cesium.Cartographic.fromCartesian(pos);
+                    smartFlyTo(
+                        Cesium.Math.toDegrees(carto.longitude),
+                        Cesium.Math.toDegrees(carto.latitude),
+                        0, 8000);
+                }
+            } else if (entityId.startsWith('buoy-')) {
+                clearAllTrails();
+                const pos = picked.id.position?.getValue(Cesium.JulianDate.now());
+                if (pos) {
+                    const carto = Cesium.Cartographic.fromCartesian(pos);
+                    smartFlyTo(
+                        Cesium.Math.toDegrees(carto.longitude),
+                        Cesium.Math.toDegrees(carto.latitude),
+                        0, 200000);
+                }
+            }
+        } else {
+            clearAllTrails();
+            hideEntityInfo();
+        }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+}
+
+async function showEntityInfo(entity, type) {
+    const list = document.getElementById('entityList');
+
+    // --- SHIP ---
+    if (type === 'ship') {
+        const NAV_STATUS = ['Under way using engine','At anchor','Not under command','Restricted manoeuvrability','Constrained by draught','Moored','Aground','Engaged in Fishing','Under way sailing','Reserved','Reserved','Reserved','Reserved','Reserved','AIS-SART','Not defined'];
+        const SHIP_TYPES = {0:'Not available',20:'Wing in ground',30:'Fishing',31:'Towing',32:'Towing (large)',33:'Dredging',34:'Diving ops',35:'Military ops',36:'Sailing',37:'Pleasure craft',40:'High speed craft',50:'Pilot vessel',51:'Search & Rescue',52:'Tug',53:'Port tender',54:'Anti-pollution',55:'Law enforcement',58:'Medical transport',59:'Resolution 18',60:'Passenger',70:'Cargo',80:'Tanker',90:'Other'};
+        const statusText = NAV_STATUS[entity.status] || 'Unknown';
+        let typeText = SHIP_TYPES[entity.ship_type] || SHIP_TYPES[Math.floor(entity.ship_type/10)*10] || `Type ${entity.ship_type}`;
+
+        list.innerHTML = `
+            <div style="padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+                <div style="font-family: JetBrains Mono; font-weight: 700; color: #4488ff; font-size: 15px; margin-bottom: 8px;">
+                    ⚓ ${entity.name || 'Unknown Vessel'}
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;">
+                    <div class="entity-meta">MMSI</div><div class="entity-meta" style="color: var(--text-primary);">${entity.mmsi}</div>
+                    <div class="entity-meta">Type</div><div class="entity-meta" style="color: var(--text-primary);">${typeText}</div>
+                    <div class="entity-meta">Status</div><div class="entity-meta" style="color: var(--text-primary);">${statusText}</div>
+                </div>
+                <div style="border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px;">
+                    <div style="color: #4488ff; font-size: 10px; letter-spacing: 1px; margin-bottom: 4px;">NAVIGATION</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;">
+                        <div class="entity-meta">Speed</div><div class="entity-meta" style="color: var(--text-primary);">${entity.speed} kts</div>
+                        <div class="entity-meta">Heading</div><div class="entity-meta" style="color: var(--text-primary);">${entity.heading < 511 ? entity.heading + '°' : 'N/A'}</div>
+                        <div class="entity-meta">Course</div><div class="entity-meta" style="color: var(--text-primary);">${entity.course}°</div>
+                        <div class="entity-meta">Position</div><div class="entity-meta" style="color: var(--text-primary);">${entity.lat.toFixed(4)}°, ${entity.lon.toFixed(4)}°</div>
+                    </div>
+                </div>
+                <div style="font-size: 9px; color: var(--text-secondary); margin-top: 8px; text-align: center;">AIS Data • <a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:${entity.mmsi}" target="_blank" style="color: #4488ff;">MarineTraffic ⇗</a></div>
+            </div>`;
+        return;
+    }
+
+    // --- FLIGHT ---
+    if (type === 'flight') {
+        const color = entity.military ? 'var(--military)' : 'var(--flight)';
+        const vspeed = entity.baro_rate || 0;
+        const vArrow = vspeed > 100 ? '↗️' : vspeed < -100 ? '↘️' : '➡️';
+
+        // Fetch aircraft DB info + photo
+        let dbInfo = '';
+        let photoHtml = '';
+        try {
+            const [dbResp, photoResp] = await Promise.all([
+                fetch(`${API_BASE}/api/aircraft/${entity.hex}`),
+                fetch(`${API_BASE}/api/aircraft-photo/${entity.hex}`),
+            ]);
+            const db = await dbResp.json();
+            const photo = await photoResp.json();
+            if (photo.photo_url) {
+                photoHtml = `<div style="margin-top:8px;"><img src="${photo.photo_url}" style="width:100%;border-radius:4px;border:1px solid var(--border);" onerror="this.style.display='none'"><div style="font-size:8px;color:var(--text-secondary);text-align:center;margin-top:2px;">© ${photo.photographer || 'Planespotters.net'}</div></div>`;
+            }
+            if (db.owner) {
+                dbInfo = `
+                    <div style="border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px;">
+                        <div style="color: var(--accent); font-size: 10px; letter-spacing: 1px; margin-bottom: 4px;">AIRCRAFT DATABASE</div>
+                        <div class="entity-meta" style="line-height: 1.8;">
+                            Airline: <span style="color: var(--text-primary);">${db.owner}</span><br>
+                            Aircraft: <span style="color: var(--text-primary);">${db.manufacturer} ${db.type_full}</span><br>
+                            Registration: <span style="color: var(--text-primary);">${db.registration}</span>
+                        </div>
+                    </div>`;
+            }
+        } catch(e) {}
+
+        list.innerHTML = `
+            <div style="padding: 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px;">
+                <div style="font-family: JetBrains Mono; font-weight: 700; color: ${color}; font-size: 15px; margin-bottom: 8px;">
+                    ${entity.military ? '✦ ' : '▸ '}${entity.flight || entity.hex}
+                    ${entity.military ? '<span style="color: var(--military); font-size: 10px;"> MILITARY</span>' : ''}
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;">
+                    <div class="entity-meta">Type</div><div class="entity-meta" style="color: var(--text-primary);">${entity.type || 'N/A'}</div>
+                    <div class="entity-meta">Registration</div><div class="entity-meta" style="color: var(--text-primary);">${entity.registration || 'N/A'}</div>
+                    <div class="entity-meta">Squawk</div><div class="entity-meta" style="color: ${entity.squawk === '7700' ? 'var(--danger)' : entity.squawk === '7600' ? 'var(--warning)' : 'var(--text-primary)'}">${entity.squawk || 'N/A'} ${entity.squawk === '7700' ? '⚠️ EMERGENCY' : entity.squawk === '7600' ? '⚠️ NO RADIO' : ''}</div>
+                </div>
+
+                <div style="border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px;">
+                    <div style="color: var(--accent); font-size: 10px; letter-spacing: 1px; margin-bottom: 4px;">FLIGHT DATA</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;">
+                        <div class="entity-meta">Altitude</div><div class="entity-meta" style="color: var(--text-primary);">${entity.alt || 'N/A'} ft ${vArrow}</div>
+                        <div class="entity-meta">Geo Alt</div><div class="entity-meta" style="color: var(--text-primary);">${entity.alt_geom || 'N/A'} ft</div>
+                        <div class="entity-meta">Ground Speed</div><div class="entity-meta" style="color: var(--text-primary);">${entity.speed || 'N/A'} kts</div>
+                        <div class="entity-meta">IAS / TAS</div><div class="entity-meta" style="color: var(--text-primary);">${entity.ias || '?'} / ${entity.tas || '?'} kts</div>
+                        <div class="entity-meta">Mach</div><div class="entity-meta" style="color: var(--text-primary);">${entity.mach || 'N/A'}</div>
+                        <div class="entity-meta">Heading</div><div class="entity-meta" style="color: var(--text-primary);">${entity.heading || 'N/A'}°</div>
+                        <div class="entity-meta">V/S</div><div class="entity-meta" style="color: ${vspeed > 100 ? 'var(--success)' : vspeed < -100 ? 'var(--warning)' : 'var(--text-primary)'}">${vspeed || 0} ft/min</div>
+                        <div class="entity-meta">Set Alt</div><div class="entity-meta" style="color: var(--text-primary);">${entity.nav_altitude || 'N/A'} ft</div>
+                    </div>
+                </div>
+
+                ${entity.oat != null ? `
+                <div style="border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px;">
+                    <div style="color: var(--accent); font-size: 10px; letter-spacing: 1px; margin-bottom: 4px;">ENVIRONMENT</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;">
+                        <div class="entity-meta">OAT</div><div class="entity-meta" style="color: var(--text-primary);">${entity.oat}°C</div>
+                        <div class="entity-meta">Wind</div><div class="entity-meta" style="color: var(--text-primary);">${entity.wind_dir || '?'}° / ${entity.wind_speed || '?'} kts</div>
+                    </div>
+                </div>` : ''}
+
+                ${dbInfo}
+
+                ${photoHtml}
+
+                <div style="font-size: 9px; color: var(--text-secondary); margin-top: 8px; text-align: center;">ICAO: ${entity.hex} • Trail builds over time</div>
+            </div>`;
+    } else {
+        list.innerHTML = `
+            <div style="padding: 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px;">
+                <div style="font-family: JetBrains Mono; font-weight: 700; color: var(--satellite); font-size: 15px; margin-bottom: 8px;">
+                    ◉ ${entity.name}
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;">
+                    <div class="entity-meta">Altitude</div><div class="entity-meta" style="color: var(--text-primary);">${entity.alt} km</div>
+                    <div class="entity-meta">Velocity</div><div class="entity-meta" style="color: var(--text-primary);">${entity.velocity} km/s</div>
+                    <div class="entity-meta">Latitude</div><div class="entity-meta" style="color: var(--text-primary);">${entity.lat}°</div>
+                    <div class="entity-meta">Longitude</div><div class="entity-meta" style="color: var(--text-primary);">${entity.lon}°</div>
+                </div>
+                <div style="font-size: 9px; color: var(--satellite); margin-top: 8px; text-align: center;">Showing 90-minute orbit prediction</div>
+            </div>`;
+    }
+}
+
+function hideEntityInfo() {
+    updateEntityList();
+}
+
+// =========================================================================
+// MARINE / WEBCAMS / TRAINS
+// =========================================================================
+async function fetchMarine() {
+    if (!layers.marine) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/marine`);
+        const data = await resp.json();
+        renderMarineBuoys(data.buoys || []);
+    } catch(e) { console.error('Marine fetch error:', e); }
+}
+
+function renderMarineBuoys(buoys) {
+    // Remove old
+    for (const e of Object.values(marineEntities)) viewer.entities.remove(e);
+    marineEntities = {};
+    if (!layers.marine) return;
+
+    for (const b of buoys) {
+        const id = `buoy-${b.lat}-${b.lon}`;
+        marineEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(b.lon, b.lat, 0),
+            billboard: { image: BUOY_SVG, width: 16, height: 16, scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 2e7, 0.3) },
+            label: {
+                text: `${b.wave_height}m`,
+                font: '9px JetBrains Mono',
+                fillColor: Cesium.Color.fromCssColorString('#44aacc'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(14, 0),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 1e7, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8e6),
+            },
+        });
+    }
+}
+
+async function fetchWebcams() {
+    if (!layers.webcams) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/webcams`);
+        const data = await resp.json();
+        renderWebcams(data.webcams || []);
+    } catch(e) { console.error('Webcam fetch error:', e); }
+}
+
+function renderWebcams(cams) {
+    for (const e of Object.values(webcamEntities)) viewer.entities.remove(e);
+    webcamEntities = {};
+    if (!layers.webcams) return;
+
+    const typeEmojis = {'airport':'\u2708\uFE0F','beach':'\uD83C\uDFD6\uFE0F','nature':'\uD83C\uDF0B','traffic':'\uD83D\uDE97','city':'\uD83C\uDFD9\uFE0F','port':'\u2693','wildlife':'\uD83E\uDD81','space':'\uD83D\uDE80'};
+    for (const c of cams) {
+        const id = `cam-${c.name}`;
+        const emoji = typeEmojis[c.type] || '\uD83D\uDCF7';
+        webcamEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, 100),
+            billboard: { image: WEBCAM_SVG, width: 20, height: 20, scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 1e7, 0.4) },
+            label: {
+                text: `${emoji} ${c.name}`,
+                font: '10px JetBrains Mono',
+                fillColor: Cesium.Color.fromCssColorString('#ff8800'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(16, 0),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 5e6, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3e6),
+            },
+            properties: { url: c.url, camName: c.name, embedUrl: c.embed || '', imageUrl: c.image || '', camType: c.type || 'landmark' },
+        });
+    }
+}
+
+function showCamOverlay(name, url, embedUrl, imgUrl, camType) {
+    // Remove existing overlay
+    closeCamOverlay();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'camOverlay';
+    overlay.style.cssText = `
+        position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 2000;
+        width: 640px; max-width: 90vw; background: rgba(10,14,23,0.97);
+        border: 1px solid var(--border); border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.8); backdrop-filter: blur(16px);
+        overflow: hidden; font-family: 'JetBrains Mono', monospace;
+    `;
+
+    const typeEmojis = {airport:'\u2708\uFE0F',beach:'\uD83C\uDFD6\uFE0F',nature:'\uD83C\uDF0B',traffic:'\uD83D\uDE97',city:'\uD83C\uDFD9\uFE0F',port:'\u2693',wildlife:'\uD83E\uDD81',space:'\uD83D\uDE80',landmark:'\uD83C\uDFDB\uFE0F'};
+    const emoji = typeEmojis[camType] || '\uD83D\uDCF7';
+
+    let contentHtml = '';
+    if (embedUrl && embedUrl.includes('youtube.com')) {
+        // YouTube embed
+        contentHtml = `<iframe src="${embedUrl}" style="width:100%;height:360px;border:none;" allowfullscreen allow="autoplay; encrypted-media"></iframe>`;
+    } else if (embedUrl && embedUrl.includes('skylinewebcams.com')) {
+        // Skylinewebcams
+        contentHtml = `<iframe src="${embedUrl}" style="width:100%;height:360px;border:none;" allowfullscreen sandbox="allow-scripts allow-same-origin"></iframe>`;
+    } else if (embedUrl) {
+        // Generic embed
+        contentHtml = `<iframe src="${embedUrl}" style="width:100%;height:360px;border:none;" allowfullscreen allow="autoplay"></iframe>`;
+    } else if (imgUrl) {
+        // Static/refreshing image (TfL etc) — auto-refresh every 10s
+        const imgId = 'camImg_' + Date.now();
+        contentHtml = `<div style="position:relative;">
+            <img id="${imgId}" src="${imgUrl}" style="width:100%;max-height:400px;object-fit:contain;" onerror="this.outerHTML='<div style=padding:40px;text-align:center;color:var(--text-secondary)>Image unavailable</div>'">
+            <div style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);padding:2px 8px;border-radius:4px;font-size:9px;color:var(--success);">\u25CF REFRESHING</div>
+        </div>`;
+        // Auto-refresh image
+        setTimeout(() => {
+            const refreshInterval = setInterval(() => {
+                const img = document.getElementById('${imgId}');
+                if (!img || !document.getElementById('camOverlay')) { clearInterval(refreshInterval); return; }
+                img.src = imgUrl + (imgUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+            }, 10000);
+        }, 100);
+        // No embed, no image — load the source URL directly in iframe
+        contentHtml = `<iframe src="${url}" style="width:100%;height:400px;border:none;" allowfullscreen sandbox="allow-scripts allow-same-origin allow-popups" 
+            onerror="this.outerHTML='<div style=padding:40px;text-align:center;color:var(--text-secondary)>Cannot embed this source</div>'"></iframe>
+            <div style="text-align:center;padding:4px;font-size:9px;color:var(--text-secondary);">If blank, the site blocks embedding — <a href="${url}" target="_blank" style="color:var(--accent);">open in new tab</a></div>`;
+        // Static image (TfL etc)
+        contentHtml = `<img src="${imgUrl}" style="width:100%;max-height:400px;object-fit:contain;" onerror="this.outerHTML='<div style=padding:40px;text-align:center;color:var(--text-secondary)>Image unavailable</div>'">`;
+    } else {
+        // No embed — try fetching a live snapshot from the source
+        const snapshotId = 'camSnap_' + Date.now();
+        contentHtml = `<div id="${snapshotId}" style="text-align:center;padding:30px;color:var(--text-secondary);">Loading snapshot...</div>
+            <div style="text-align:center;padding:4px;font-size:9px;color:var(--text-secondary);"><a href="${url}" target="_blank" style="color:var(--accent);">Open source in browser \u21D7</a></div>`;
+        // After overlay is created, fetch snapshot
+        setTimeout(async () => {
+            try {
+                const resp = await fetch(`${API_BASE}/api/webcam-snapshot?url=${encodeURIComponent(url)}`);
+                const data = await resp.json();
+                const container = document.getElementById(snapshotId);
+                if (container && data.image) {
+                    const imgId = 'camSnapImg_' + Date.now();
+                    container.innerHTML = `<div style="position:relative;">
+                        <img id="${imgId}" src="${data.image}" style="width:100%;max-height:400px;object-fit:contain;" onerror="this.parentElement.innerHTML='<div style=padding:20px>Image blocked by source</div>'">
+                        <div style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);padding:2px 8px;border-radius:4px;font-size:9px;color:var(--success);">\u25CF SNAPSHOT</div>
+                    </div>`;
+                    // Auto-refresh snapshot every 30s
+                    const refreshSnap = setInterval(() => {
+                        const img = document.getElementById(imgId);
+                        if (!img || !document.getElementById('camOverlay')) { clearInterval(refreshSnap); return; }
+                        img.src = data.image + (data.image.includes('?') ? '&' : '?') + 'r=' + Date.now();
+                    }, 30000);
+                } else if (container) {
+                    container.innerHTML = `<iframe src="${url}" style="width:100%;height:400px;border:none;" sandbox="allow-scripts allow-same-origin allow-popups"></iframe>`;
+                }
+            } catch(e) {
+                const container = document.getElementById(snapshotId);
+                if (container) container.innerHTML = `<iframe src="${url}" style="width:100%;height:400px;border:none;" sandbox="allow-scripts allow-same-origin allow-popups"></iframe>`;
+            }
+        }, 100);
+    }
+
+    overlay.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);">
+            <div>
+                <span style="color:#ff8800;font-size:14px;font-weight:700;">${emoji} ${name}</span>
+                <span style="color:var(--text-secondary);font-size:10px;margin-left:8px;">${camType.toUpperCase()}</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                ${url ? `<a href="${url}" target="_blank" style="color:var(--accent);font-size:10px;text-decoration:none;">Source \u21D7</a>` : ''}
+                <div onclick="closeCamOverlay()" style="cursor:pointer;color:var(--text-secondary);font-size:18px;padding:0 4px;">&times;</div>
+            </div>
+        </div>
+        ${contentHtml}
+    `;
+
+    document.body.appendChild(overlay);
+}
+
+function closeCamOverlay() {
+    const el = document.getElementById('camOverlay');
+    if (el) el.remove();
+}
+
+async function fetchTrains() {
+    if (!layers.trains) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/trains`);
+        const data = await resp.json();
+        console.log(`Trains loaded: ${data.count}`);
+        renderTrains(data.trains || []);
+    } catch(e) { console.error('Train fetch error:', e); }
+}
+
+async function fetchShips() {
+    if (!layers.ships) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/ships?limit=3000`);
+        const data = await resp.json();
+        allShips = data.ships || [];
+        renderShips(allShips);
+        // Update ships count in stats
+        document.getElementById('statShips').textContent = data.total_tracked.toLocaleString();
+    } catch(e) { console.error('Ships fetch error:', e); }
+}
+
+function renderShips(ships) {
+    // Remove old
+    for (const e of Object.values(shipEntities)) viewer.entities.remove(e);
+    shipEntities = {};
+    if (!layers.ships) return;
+
+    for (const s of ships) {
+        if (!s.lat || !s.lon) continue;
+        const id = `ship-${s.mmsi}`;
+        const heading = s.heading < 511 ? s.heading : s.course;
+        shipEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 0),
+            billboard: {
+                image: SHIP_SVG,
+                width: 14,
+                height: 14,
+                rotation: -Cesium.Math.toRadians(heading || 0),
+                scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 1e7, 0.2),
+            },
+            label: {
+                text: s.name || String(s.mmsi),
+                font: '9px JetBrains Mono',
+                fillColor: Cesium.Color.fromCssColorString('#4488ff'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(12, 0),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 3e6, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2e6),
+            },
+        });
+    }
+}
+
+function renderTrains(trains) {
+    for (const e of Object.values(trainEntities)) viewer.entities.remove(e);
+    trainEntities = {};
+    if (!layers.trains) return;
+
+    for (const t of trains) {
+        const id = `train-${t.id}`;
+        trainEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(t.lon, t.lat, 100),
+            billboard: {
+                image: TRAIN_SVG,
+                width: 18,
+                height: 18,
+                scaleByDistance: new Cesium.NearFarScalar(1e4, 2, 1e7, 0.5),
+            },
+            label: {
+                text: `${t.network || t.type} ${t.number}`,
+                font: '10px JetBrains Mono',
+                fillColor: Cesium.Color.fromCssColorString('#cc44ff'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(14, 0),
+                scaleByDistance: new Cesium.NearFarScalar(1e4, 1, 5e6, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 5e6),
+            },
+        });
+    }
+    console.log(`Rendered ${Object.keys(trainEntities).length} train entities`);
+}
+
+async function addWeatherOverlay() {
+    if (weatherLayer) { viewer.imageryLayers.remove(weatherLayer); weatherLayer = null; }
+    if (!layers.weather) return;
+    weatherLayer = viewer.imageryLayers.addImageryProvider(
+        new Cesium.UrlTemplateImageryProvider({
+            url: 'https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid=demo',
+            minimumLevel: 0, maximumLevel: 6, credit: 'OpenWeatherMap',
+        })
+    );
+    weatherLayer.alpha = 0.5;
+}
+
+// =========================================================================
+// EARTHQUAKES
+// =========================================================================
+async function fetchEarthquakes() {
+    if (!layers.earthquakes) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/earthquakes`);
+        const data = await resp.json();
+        allEarthquakes = data.earthquakes || [];
+        document.getElementById('statQuakes').textContent = allEarthquakes.length.toLocaleString();
+        renderEarthquakes();
+    } catch(e) { console.error('Earthquake fetch error:', e); }
+}
+
+function renderEarthquakes() {
+    for (const e of Object.values(earthquakeEntities)) viewer.entities.remove(e);
+    earthquakeEntities = {};
+    if (!layers.earthquakes) return;
+    for (const q of allEarthquakes) {
+        if (!q.lat || !q.lon) continue;
+        const mag = q.mag || 0;
+        const size = Math.max(12, Math.min(40, mag * 8));
+        const id = `quake-${q.lat}-${q.lon}-${q.time}`;
+        earthquakeEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(q.lon, q.lat, 0),
+            billboard: { image: QUAKE_SVG, width: size, height: size,
+                scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 2e7, 0.3) },
+            label: {
+                text: `M${mag.toFixed(1)}`,
+                font: '10px JetBrains Mono', fillColor: Cesium.Color.fromCssColorString('#ff4444'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(0, -size/2 - 8),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 8e6, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8e6),
+            },
+        });
+    }
+}
+
+// =========================================================================
+// FIRES
+// =========================================================================
+async function fetchFires() {
+    if (!layers.fires) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/fires`);
+        const data = await resp.json();
+        allFires = data.fires || [];
+        document.getElementById('statFires').textContent = allFires.length.toLocaleString();
+        renderFires();
+    } catch(e) { console.error('Fire fetch error:', e); }
+}
+
+function renderFires() {
+    for (const e of Object.values(fireEntities)) viewer.entities.remove(e);
+    fireEntities = {};
+    if (!layers.fires) return;
+    for (const f of allFires) {
+        if (!f.lat || !f.lon) continue;
+        const id = `fire-${f.lat}-${f.lon}`;
+        fireEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(f.lon, f.lat, 0),
+            billboard: { image: FIRE_SVG, width: 12, height: 12,
+                scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 2e7, 0.2) },
+        });
+    }
+}
+
+// =========================================================================
+// AIR QUALITY
+// =========================================================================
+async function fetchAirQuality() {
+    if (!layers.airquality) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/air-quality`);
+        const data = await resp.json();
+        renderAirQuality(data.air_quality || []);
+    } catch(e) { console.error('AQI fetch error:', e); }
+}
+
+function renderAirQuality(items) {
+    for (const e of Object.values(aqiEntities)) viewer.entities.remove(e);
+    aqiEntities = {};
+    if (!layers.airquality) return;
+    for (const a of items) {
+        const id = `aqi-${a.city}`;
+        aqiEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(a.lon, a.lat, 50000),
+            billboard: { image: makeAqiIcon(a.aqi), width: 28, height: 28,
+                scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 2e7, 0.4) },
+            label: {
+                text: a.city,
+                font: '10px JetBrains Mono', fillColor: Cesium.Color.fromCssColorString('#88cc44'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(0, 22),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 8e6, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 5e6),
+            },
+        });
+    }
+}
+
+// =========================================================================
+// GPS JAMMING
+// =========================================================================
+async function fetchGpsJamming() {
+    if (!layers.gpsjam) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/gps-jamming`);
+        const data = await resp.json();
+        renderGpsJamming(data.zones || []);
+    } catch(e) { console.error('GPS jam fetch error:', e); }
+}
+
+function renderGpsJamming(zones) {
+    for (const e of Object.values(gpsJamEntities)) viewer.entities.remove(e);
+    gpsJamEntities = {};
+    if (!layers.gpsjam) return;
+    const intensityColors = { low: '#ff006640', medium: '#ff006680', high: '#ff0066aa', critical: '#ff0066dd' };
+    for (const z of zones) {
+        const id = `jam-${z.name}`;
+        // Circle overlay
+        gpsJamEntities[id + '-circle'] = viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(z.lon, z.lat),
+            ellipse: {
+                semiMinorAxis: z.radius_km * 1000,
+                semiMajorAxis: z.radius_km * 1000,
+                material: Cesium.Color.fromCssColorString(intensityColors[z.intensity] || '#ff006660'),
+                outline: true,
+                outlineColor: Cesium.Color.fromCssColorString('#ff0066'),
+                outlineWidth: 2,
+                height: 0,
+            },
+        });
+        // Icon
+        gpsJamEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(z.lon, z.lat, 5000),
+            billboard: { image: JAMMING_SVG, width: 24, height: 24,
+                scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 2e7, 0.4) },
+            label: {
+                text: `⚠ ${z.name} [${z.intensity.toUpperCase()}]`,
+                font: '11px JetBrains Mono', fillColor: Cesium.Color.fromCssColorString('#ff0066'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(20, 0),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 1e7, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8e6),
+            },
+        });
+    }
+}
+
+// =========================================================================
+// FINANCE
+// =========================================================================
+async function fetchFinance() {
+    if (!layers.finance) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/finance`);
+        const data = await resp.json();
+        renderFinance(data.indices || []);
+    } catch(e) { console.error('Finance fetch error:', e); }
+}
+
+function renderFinance(indices) {
+    for (const e of Object.values(financeEntities)) viewer.entities.remove(e);
+    financeEntities = {};
+    if (!layers.finance) return;
+    for (const idx of indices) {
+        const id = `fin-${idx.symbol}`;
+        const isUp = idx.change_pct >= 0;
+        const color = isUp ? '#00ff88' : '#ff3366';
+        const arrow = isUp ? '▲' : '▼';
+        financeEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(idx.lon, idx.lat, 100000),
+            billboard: { image: isUp ? FINANCE_SVG_UP : FINANCE_SVG_DOWN, width: 28, height: 28,
+                scaleByDistance: new Cesium.NearFarScalar(5e5, 1.5, 2e7, 0.4) },
+            label: {
+                text: `${idx.name}\n${arrow} ${idx.change_pct > 0 ? '+' : ''}${idx.change_pct}%`,
+                font: '11px JetBrains Mono', fillColor: Cesium.Color.fromCssColorString(color),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(22, 0),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1, 1e7, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8e6),
+            },
+        });
+    }
+}
+
+// =========================================================================
+// BIKES
+// =========================================================================
+async function fetchBikes() {
+    if (!layers.bikes) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/bikes`);
+        const data = await resp.json();
+        renderBikes(data.networks || []);
+    } catch(e) { console.error('Bikes fetch error:', e); }
+}
+
+function renderBikes(networks) {
+    for (const e of Object.values(bikeEntities)) viewer.entities.remove(e);
+    bikeEntities = {};
+    if (!layers.bikes) return;
+    for (const n of networks) {
+        if (!n.lat || !n.lon) continue;
+        const id = `bike-${n.id}`;
+        bikeEntities[id] = viewer.entities.add({
+            id: id,
+            position: Cesium.Cartesian3.fromDegrees(n.lon, n.lat, 100),
+            billboard: { image: BIKE_SVG, width: 14, height: 14,
+                scaleByDistance: new Cesium.NearFarScalar(5e4, 1.5, 5e6, 0.2) },
+            label: {
+                text: n.name,
+                font: '9px JetBrains Mono', fillColor: Cesium.Color.fromCssColorString('#88ff00'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(12, 0),
+                scaleByDistance: new Cesium.NearFarScalar(1e4, 1, 2e6, 0),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1e6),
+            },
+        });
+    }
+}
+
+// =========================================================================
+// NEWS PANEL (AI Intel Briefing)
+// =========================================================================
+async function showNewsPanel() {
+    const el = document.getElementById('toggle-news');
+    el.classList.toggle('active');
+    const list = document.getElementById('entityList');
+    list.innerHTML = '<div style="color:var(--accent);padding:10px;font-style:italic;">Loading intel briefing...</div>';
+    try {
+        const resp = await fetch(`${API_BASE}/api/news`);
+        const data = await resp.json();
+        const summary = (data.summary || 'No data').replace(/\n/g, '<br>');
+        list.innerHTML = `
+            <div style="padding:10px;border:1px solid var(--border);border-radius:6px;">
+                <div style="font-family:JetBrains Mono;font-weight:700;color:#ffcc00;font-size:13px;margin-bottom:10px;">\uD83D\uDCE1 INTEL BRIEFING</div>
+                <div style="font-size:12px;line-height:1.6;color:var(--text-primary);">${summary}</div>
+                <div style="font-size:9px;color:var(--text-secondary);margin-top:8px;text-align:center;">AI synthesis via Perplexity • ${data.timestamp ? new Date(data.timestamp).toISOString().substr(11,8) : '?'} UTC</div>
+            </div>`;
+    } catch(e) {
+        list.innerHTML = '<div style="color:var(--danger);padding:10px;">Failed to load intel briefing</div>';
+    }
+}
+
+// =========================================================================
+// SQUAWK ALERT CHECK
+// =========================================================================
+async function checkSquawkAlerts() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/squawk-alerts`);
+        const data = await resp.json();
+        if (data.count > 0) {
+            console.warn(`[ALERT] ${data.count} emergency squawk(s) active!`, data.alerts);
+            // Could add visual alert banner here
+        }
+    } catch(e) {}
+}
+
+// =========================================================================
+// VISUAL FILTERS (GLSL Post-Processing)
+// =========================================================================
+function setVisualFilter(filterName) {
+    // Remove existing filter
+    if (currentFilter) {
+        viewer.scene.postProcessStages.remove(currentFilter);
+        currentFilter = null;
+    }
+    if (filterName === 'none') return;
+
+    const shaders = {
+        nightvision: `
+            uniform sampler2D colorTexture;
+            in vec2 v_textureCoordinates;
+            void main() {
+                vec4 color = texture(colorTexture, v_textureCoordinates);
+                float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                // Scanlines
+                float scanline = sin(v_textureCoordinates.y * 800.0) * 0.04;
+                out_FragColor = vec4(gray * 0.2, gray * 1.2 + scanline, gray * 0.15, 1.0);
+            }`,
+        thermal: `
+            uniform sampler2D colorTexture;
+            in vec2 v_textureCoordinates;
+            void main() {
+                vec4 color = texture(colorTexture, v_textureCoordinates);
+                float intensity = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                // FLIR-style: dark=purple, mid=red/orange, hot=yellow/white
+                vec3 thermal;
+                if (intensity < 0.25) thermal = mix(vec3(0.1, 0.0, 0.2), vec3(0.5, 0.0, 0.5), intensity * 4.0);
+                else if (intensity < 0.5) thermal = mix(vec3(0.5, 0.0, 0.5), vec3(1.0, 0.2, 0.0), (intensity - 0.25) * 4.0);
+                else if (intensity < 0.75) thermal = mix(vec3(1.0, 0.2, 0.0), vec3(1.0, 0.8, 0.0), (intensity - 0.5) * 4.0);
+                else thermal = mix(vec3(1.0, 0.8, 0.0), vec3(1.0, 1.0, 1.0), (intensity - 0.75) * 4.0);
+                out_FragColor = vec4(thermal, 1.0);
+            }`,
+        crt: `
+            uniform sampler2D colorTexture;
+            in vec2 v_textureCoordinates;
+            void main() {
+                vec2 uv = v_textureCoordinates;
+                // CRT warp
+                vec2 center = uv - 0.5;
+                float d = dot(center, center);
+                uv = uv + center * d * 0.15;
+                vec4 color = texture(colorTexture, uv);
+                // Scanlines
+                float scanline = sin(uv.y * 600.0) * 0.08;
+                // Slight RGB offset
+                float r = texture(colorTexture, uv + vec2(0.001, 0.0)).r;
+                float b = texture(colorTexture, uv - vec2(0.001, 0.0)).b;
+                out_FragColor = vec4(r - scanline, color.g - scanline, b - scanline, 1.0);
+            }`,
+    };
+
+    if (shaders[filterName]) {
+        currentFilter = viewer.scene.postProcessStages.add(
+            new Cesium.PostProcessStage({ fragmentShader: shaders[filterName] })
+        );
+    }
+}
+
+// =========================================================================
+// 2D / 3D TOGGLE
+// =========================================================================
+function toggle2D3D() {
+    is3D = !is3D;
+    const el = document.getElementById('toggle-3d');
+    const label = document.getElementById('mode3dLabel');
+    el.classList.toggle('active', is3D);
+    if (is3D) {
+        label.textContent = '3D Globe';
+        viewer.scene.morphTo3D(1.0);
+    } else {
+        label.textContent = '2D Map';
+        viewer.scene.morphTo2D(1.0);
+    }
+}
+
+function filterEntities(query) {
+    if (!query) { updateEntityList(); return; }
+    query = query.toLowerCase();
+    const list = document.getElementById('entityList');
+    const items = [];
+
+    for (const f of allFlights) {
+        if ((f.flight||'').toLowerCase().includes(query) || (f.hex||'').toLowerCase().includes(query) ||
+            (f.registration||'').toLowerCase().includes(query) || (f.type||'').toLowerCase().includes(query)) {
+            const c = f.military ? 'var(--military)' : 'var(--flight)';
+            items.push(`<div class="entity-item" onclick="flyToEntity(${f.lon},${f.lat})">
+                <div><div class="entity-name" style="color:${c}">${f.military?'✦':'▸'} ${f.flight||f.hex}</div>
+                <div class="entity-meta">${f.type||'?'} • ${f.registration||''}</div></div>
+                <div class="entity-meta">${f.alt||'?'} ft</div></div>`);
+        }
+        if (items.length >= 20) break;
+    }
+    for (const s of allSatellites) {
+        if (s.name.toLowerCase().includes(query)) {
+            items.push(`<div class="entity-item" onclick="flyToEntity(${s.lon},${s.lat})">
+                <div><div class="entity-name" style="color:var(--satellite)">◉ ${s.name}</div>
+                <div class="entity-meta">${s.alt} km</div></div>
+                <div class="entity-meta">${s.velocity} km/s</div></div>`);
+        }
+        if (items.length >= 20) break;
+    }
+    list.innerHTML = items.join('') || '<div style="color:var(--text-secondary);padding:8px 0;">No entity matches — press Enter to search location</div>';
+}
+
+async function searchLocation(query) {
+    if (!query || query.length < 2) return;
+    const list = document.getElementById('entityList');
+    list.innerHTML = '<div style="color:var(--accent);padding:8px;">Searching location...</div>';
+
+    try {
+        const resp = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=8&addressdetails=1&extratags=1`, {
+            headers: {'User-Agent': 'SkyWatch/2.0'}
+        });
+        const results = await resp.json();
+
+        if (results.length === 0) {
+            list.innerHTML = '<div style="color:var(--text-secondary);padding:8px;">No location found</div>';
+            return;
+        }
+
+        // Fly to best result immediately
+        const best = results[0];
+        const bbox = best.boundingbox; // [south, north, west, east]
+        if (bbox) {
+            const south = parseFloat(bbox[0]), north = parseFloat(bbox[1]);
+            const west = parseFloat(bbox[2]), east = parseFloat(bbox[3]);
+            viewer.camera.flyTo({
+                destination: Cesium.Rectangle.fromDegrees(west, south, east, north),
+                duration: 1.5,
+            });
+        } else {
+            const zoomAlt = getZoomForType(best.type, best.class);
+            viewer.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(parseFloat(best.lon), parseFloat(best.lat), zoomAlt),
+                orientation: { heading: 0, pitch: Cesium.Math.toRadians(-60), roll: 0 },
+                duration: 1.5,
+            });
+        }
+
+        // Show results list
+        const items = results.map(r => {
+            const icon = getIconForType(r.type, r.class);
+            return `<div class="entity-item" onclick="flyToLocation(${r.lon},${r.lat},'${r.type}','${r.class}',${JSON.stringify(r.boundingbox||[])})">
+                <div><div class="entity-name" style="color:var(--accent);">${icon} ${r.display_name.split(',').slice(0,2).join(',')}</div>
+                <div class="entity-meta">${r.type} • ${r.class}</div></div>
+                <div class="entity-meta" style="font-size:9px;">${parseFloat(r.lat).toFixed(2)}, ${parseFloat(r.lon).toFixed(2)}</div></div>`;
+        });
+        list.innerHTML = items.join('');
+    } catch(e) {
+        console.error('Geocode error:', e);
+        list.innerHTML = '<div style="color:var(--danger);padding:8px;">Search failed</div>';
+    }
+}
+
+function flyToLocation(lon, lat, type, cls, bbox) {
+    if (bbox && bbox.length === 4) {
+        const south = parseFloat(bbox[0]), north = parseFloat(bbox[1]);
+        const west = parseFloat(bbox[2]), east = parseFloat(bbox[3]);
+        viewer.camera.flyTo({
+            destination: Cesium.Rectangle.fromDegrees(west, south, east, north),
+            duration: 1.5,
+        });
+    } else {
+        const alt = getZoomForType(type, cls);
+        viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt),
+            orientation: { heading: 0, pitch: Cesium.Math.toRadians(-60), roll: 0 },
+            duration: 1.5,
+        });
+    }
+}
+
+function getZoomForType(type, cls) {
+    // Return appropriate altitude based on location type
+    if (cls === 'boundary' && type === 'administrative') return 2000000; // country/state
+    if (type === 'country') return 3000000;
+    if (type === 'state' || type === 'region') return 1500000;
+    if (type === 'city' || type === 'town') return 80000;
+    if (type === 'village' || type === 'suburb') return 20000;
+    if (type === 'neighbourhood') return 5000;
+    if (type === 'aerodrome' || type === 'airport') return 15000;
+    if (type === 'building' || type === 'house') return 1000;
+    return 50000;
+}
+
+function getIconForType(type, cls) {
+    if (type === 'country' || (cls === 'boundary' && type === 'administrative')) return '\uD83C\uDDFA\uD83C\uDDF3';
+    if (type === 'city' || type === 'town') return '\uD83C\uDFD9\uFE0F';
+    if (type === 'village' || type === 'suburb') return '\uD83C\uDFE0';
+    if (type === 'aerodrome' || type === 'airport') return '\u2708\uFE0F';
+    if (type === 'peak' || type === 'mountain') return '\u26F0\uFE0F';
+    if (type === 'island') return '\uD83C\uDFDD\uFE0F';
+    if (cls === 'waterway' || cls === 'natural') return '\uD83C\uDF0A';
+    return '\uD83D\uDCCD';
+}
+
+// =========================================================================
+// BOOT
+// =========================================================================
+async function boot() {
+    // Register Service Worker for tile caching
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js').then(() => {
+            console.log('SW: tile cache active');
+        }).catch(e => console.warn('SW registration failed:', e));
+    }
+
+    // Boot sequence animation
+    bootSequence();
+    // Safety: hide loading after 8s max
+    setTimeout(() => {
+        document.getElementById('loadingOverlay').classList.add('hidden');
+    }, 8000);
+
+    await initCesium();
+    setupClickHandler();
+    setupKeyboardShortcuts();
+    await Promise.all([fetchFlights(), fetchSatellites()]);
+    setInterval(fetchFlights, UPDATE_INTERVAL);
+    setInterval(fetchSatellites, 60000);
+    setInterval(() => { if (layers.trains) fetchTrains(); }, 30000);
+    setInterval(() => { if (layers.ships) fetchShips(); }, 20000);
+    setInterval(() => { if (layers.earthquakes) fetchEarthquakes(); }, 300000); // 5min
+    setInterval(() => { if (layers.fires) fetchFires(); }, 600000); // 10min
+    setInterval(() => { checkSquawkAlerts(); }, 60000);
+    setInterval(updateClock, 1000);
+    updateClock();
+}
+
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Don't trigger if typing in search
+        if (e.target.tagName === 'INPUT') return;
+        switch(e.key) {
+            case '1': setVisualFilter('nightvision'); break;
+            case '2': setVisualFilter('thermal'); break;
+            case '3': setVisualFilter('crt'); break;
+            case '0': setVisualFilter('none'); break;
+            case 'f': case 'F':
+                if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+                else document.exitFullscreen();
+                break;
+            case 'Escape':
+                clearAllTrails();
+                stopTracking();
+                hideEntityInfo();
+                closeCamOverlay();
+                setVisualFilter('none');
+                break;
+        }
+    });
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "skywatch",
+  "description": "Real-time geospatial intelligence dashboard — Palantir-style globe with satellite & flight tracking",
+  "version": "0.1.0",
+  "stack": ["python", "fastapi", "cesiumjs", "vanilla-js"],
+  "sources": {
+    "satellites": "CelesTrak TLE + SGP4 propagation",
+    "flights": "ADSB.lol / OpenSky Network",
+    "military": "ADS-B Exchange (filtered)"
+  }
+}
