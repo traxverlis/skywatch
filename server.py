@@ -15,10 +15,9 @@ import httpx
 import websockets
 import websockets.exceptions
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sgp4.api import Satrec, jday
-from sgp4 import exporter
 
 app = FastAPI(title="SkyWatch", version="0.1.0")
 
@@ -896,7 +895,8 @@ async def start_background_workers():
                 await get_earthquakes()
                 await get_fires()
                 print("[BG] Env data refreshed")
-            except Exception: pass
+            except Exception:
+                pass
             await asyncio.sleep(300)
     asyncio.create_task(_env_worker())
     print("[BG] Environment background worker started")
@@ -1001,7 +1001,8 @@ async def get_fires():
             for url in urls:
                 try:
                     resp = await client.get(url)
-                    if resp.status_code != 200: continue
+                    if resp.status_code != 200:
+                        continue
                     reader = csv.DictReader(StringIO(resp.text))
                     for row in reader:
                         try:
@@ -1009,11 +1010,15 @@ async def get_fires():
                                 "brightness": float(row.get("brightness", row.get("bright_ti4", 0))),
                                 "confidence": row.get("confidence", ""), "acq_date": row.get("acq_date", ""),
                                 "frp": float(row.get("frp", 0))})
-                        except (ValueError, TypeError): continue
-                    if fires: break
-                except Exception: continue
+                        except (ValueError, TypeError):
+                            continue
+                    if fires:
+                        break
+                except Exception:
+                    continue
         if len(fires) > 5000:
-            import random; fires = random.sample(fires, 5000)
+            import random
+            fires = random.sample(fires, 5000)
         cache_set("fires:all", fires)
         return {"count": len(fires), "fires": fires}
     except Exception as e:
@@ -1042,7 +1047,8 @@ async def _fetch_aqi_point(client, city, lat, lon):
         if resp.status_code == 200:
             d = resp.json().get("current", {})
             return {"city": city, "lat": lat, "lon": lon, "aqi": d.get("european_aqi"), "pm25": d.get("pm2_5"), "pm10": d.get("pm10"), "no2": d.get("nitrogen_dioxide"), "ozone": d.get("ozone")}
-    except Exception: pass
+    except Exception:
+        pass
     return None
 
 @app.get("/api/air-quality")
@@ -1082,7 +1088,8 @@ async def get_bikes():
 async def get_bike_stations(network_id: str):
     cache_key = f"bikes:{network_id}"
     cached = cache_get(cache_key)
-    if cached: return cached
+    if cached:
+        return cached
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(f"https://api.citybik.es/v2/networks/{network_id}")
@@ -1104,7 +1111,8 @@ async def get_bike_stations(network_id: str):
 async def get_aircraft_photo(hex_id: str):
     cache_key = f"aircraft-photo:{hex_id}"
     cached = cache_get(cache_key)
-    if cached: return cached
+    if cached:
+        return cached
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(f"https://api.planespotters.net/pub/photos/hex/{hex_id}", headers={"User-Agent": "SkyWatch/1.0"})
@@ -1116,7 +1124,8 @@ async def get_aircraft_photo(hex_id: str):
                         "photographer": p.get("photographer", ""), "link": p.get("link", "")}
                     cache_set(cache_key, result)
                     return result
-    except Exception: pass
+    except Exception:
+        pass
     return {"hex": hex_id, "photo_url": "", "error": "not found"}
 
 
@@ -1141,14 +1150,16 @@ if not PERPLEXITY_API_KEY:
         with open(os.path.expanduser("~/.openclaw/openclaw.json")) as f:
             _cfg = json.load(f)
         PERPLEXITY_API_KEY = _cfg.get("plugins", {}).get("entries", {}).get("perplexity", {}).get("config", {}).get("apiKey", "") or _cfg.get("providers", {}).get("perplexity", {}).get("apiKey", "")
-    except Exception: pass
+    except Exception:
+        pass
 if not PERPLEXITY_API_KEY:
     PERPLEXITY_API_KEY = os.environ.get("SKYWATCH_PERPLEXITY_KEY", "")
 
 @app.get("/api/news")
 async def get_news():
     cached = cache_get("news:global")
-    if cached: return cached
+    if cached:
+        return cached
     if not PERPLEXITY_API_KEY:
         return {"summary": "API key not configured", "error": True}
     try:
@@ -1243,7 +1254,8 @@ async def get_country_risk():
                     if math.sqrt((q["lat"] - clat)**2 + (q["lon"] - clon)**2) < 20:
                         risk_scores.setdefault(code, {"earthquake": 0, "fire": 0, "jamming": 0, "aqi": 0})
                         risk_scores[code]["earthquake"] += min(mag * 2, 20)
-    except Exception: pass
+    except Exception:
+        pass
     intensity_map = {"low": 5, "medium": 15, "high": 25, "critical": 40}
     for zone in GPS_JAMMING_ZONES:
         score = intensity_map.get(zone["intensity"], 10)
